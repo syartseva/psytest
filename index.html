@@ -347,7 +347,7 @@ function nextLearn() {
   const q = byId[id];
   const p = S.progress[id] || { box: 1, seen: false, ok: 0, no: 0 };
   learnCur = { q, p, selected: new Set(), placed: [] };
-  document.getElementById("learn-box").textContent = p.seen ? ("Коробка " + p.box) : "Новый";
+  document.getElementById("learn-box").textContent = "№" + id + " · " + (p.seen ? ("Коробка " + p.box) : "Новый");
   document.getElementById("learn-remaining").textContent = (learnQueue.length + 1) + " в очереди";
   document.getElementById("learn-q").textContent = q.q;
   const hint = document.getElementById("learn-hint");
@@ -469,7 +469,7 @@ function startExam() {
 function renderExamQ() {
   const q = byId[exam.ids[exam.i]];
   exam.selected = new Set(); exam.placed = [];
-  document.getElementById("exam-progress").textContent = (exam.i + 1) + " / " + EXAM_SIZE;
+  document.getElementById("exam-progress").textContent = "№" + q.id + "  ·  " + (exam.i + 1) + " / " + EXAM_SIZE;
   document.getElementById("exam-bar-fill").style.width = (exam.i / EXAM_SIZE * 100) + "%";
   document.getElementById("exam-q").textContent = q.q;
   const hint = document.getElementById("exam-hint");
@@ -544,7 +544,7 @@ function finishExam() {
   wrongIds.forEach(id => {
     const q = byId[id];
     const d = document.createElement("div"); d.className = "review-item";
-    d.innerHTML = "<div class='review-q'>" + escapeHtml(q.q) + "</div><div class='review-a'>" + escapeHtml(correctText(q)) + "</div>";
+    d.innerHTML = "<div class='review-q'>№" + id + ": " + escapeHtml(q.q) + "</div><div class='review-a'>" + escapeHtml(correctText(q)) + "</div>";
     rev.appendChild(d);
   });
 }
