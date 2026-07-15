@@ -131,6 +131,18 @@
     .stat-grid{grid-template-columns:repeat(2,1fr)}
     .ladder-label{flex-basis:78px;font-size:12px}
   }
+  .celebrate{position:relative;height:92px;display:flex;align-items:center;justify-content:center;margin-bottom:2px;overflow:visible}
+  .check{width:68px;height:68px}
+  .check circle{fill:none;stroke:var(--sage);stroke-width:3;stroke-dasharray:145;stroke-dashoffset:145}
+  .check path{fill:none;stroke:var(--sage);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:34;stroke-dashoffset:34}
+  .celebrate.play .check circle{animation:draw .45s ease forwards}
+  .celebrate.play .check path{animation:draw .35s .4s ease forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  .confetti{position:absolute;top:34px;width:8px;height:8px;border-radius:2px;opacity:0;pointer-events:none}
+  .celebrate.play .confetti{animation:pop .8s ease-out forwards}
+  @keyframes pop{0%{opacity:1;transform:translate(0,0) scale(.4)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(1)}}
+  .done-title{font-family:var(--serif);font-size:21px;margin:2px 0 6px}
+  @media (prefers-reduced-motion:reduce){.check circle,.check path{stroke-dashoffset:0!important;animation:none!important}.confetti{display:none!important}}
 </style>
 </head>
 <body>
@@ -165,7 +177,14 @@
       </div>
     </div>
     <div id="learn-done" class="card center" style="display:none">
+      <div id="learn-celebrate" class="celebrate">
+        <svg class="check" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="23"/><path d="M15 27 l7 7 l15 -16"/></svg>
+      </div>
+      <h2 id="learn-done-title" class="done-title"></h2>
       <p id="learn-done-msg" class="muted"></p>
+      <div class="btnrow" style="justify-content:center;margin-top:8px">
+        <button id="learn-continue" class="btn btn-primary">Продолжить учить →</button>
+      </div>
     </div>
   </section>
 
@@ -251,7 +270,7 @@ function daysAdd(base, n) {
 
 /* ---------- Хранилище ---------- */
 function defaultState() {
-  return { progress: {}, introduced: { date: todayStr(), count: 0 }, settings: { newPerDay: 50 }, exams: [], stats: { attempts: 0, correct: 0 } };
+  return { progress: {}, introduced: { date: todayStr(), count: 0 }, settings: { newPerDay: 50 }, exams: [], stats: { attempts: 0, correct: 0 }, dayLog: { date: todayStr(), count: 0 } };
 }
 let S = load();
 function load() {
@@ -260,6 +279,7 @@ function load() {
     if (!raw) return defaultState();
     const s = Object.assign(defaultState(), JSON.parse(raw));
     if (s.introduced.date !== todayStr()) s.introduced = { date: todayStr(), count: 0 };
+    if (!s.dayLog || s.dayLog.date !== todayStr()) s.dayLog = { date: todayStr(), count: 0 };
     return s;
   } catch (e) { return defaultState(); }
 }
@@ -317,12 +337,14 @@ function correctText(q) {
 }
 
 /* ===================== УЧИТЬ ===================== */
-let learnQueue = [], learnCur = null, learnAnswered = false;
+let learnQueue = [], learnCur = null, learnAnswered = false, continueMode = false;
+const DONE_TITLES = ["Дневная норма выполнена!", "Отличная работа!", "План на день закрыт!", "Так держать!"];
+const MORE_TITLES = ["Ещё блок пройден!", "Отличный темп!", "Идёшь с запасом!", "Красиво!"];
 const elLearnCheck = document.getElementById("learn-check");
 const elLearnReset = document.getElementById("learn-reset");
 const elLearnNext = document.getElementById("learn-next");
 
-function startLearn() { buildLearnQueue(); nextLearn(); }
+function startLearn() { continueMode = false; buildLearnQueue(); nextLearn(); }
 function buildLearnQueue() {
   const due = dueList();
   const nRem = newRemaining();
@@ -338,8 +360,15 @@ function nextLearn() {
   document.getElementById("learn-feedback").className = "feedback";
   if (learnQueue.length === 0) {
     wrap.style.display = "none"; done.style.display = "block";
+    const unseenLeft = DATA.some(q => !S.progress[q.id] || !S.progress[q.id].seen);
+    const titles = continueMode ? MORE_TITLES : DONE_TITLES;
+    document.getElementById("learn-done-title").textContent = titles[Math.floor(Math.random() * titles.length)];
     document.getElementById("learn-done-msg").textContent =
-      seenCount() >= TOTAL ? "Все вопросы охвачены. Отличная работа." : "На сегодня очередь пуста. Возвращайся завтра или добавь новые в настройках.";
+      "Сегодня пройдено: " + (S.dayLog ? S.dayLog.count : 0) + "." +
+      (unseenLeft ? " Можно продолжить сверх нормы." : " Все вопросы охвачены — дальше повторение.");
+    const cont = document.getElementById("learn-continue");
+    cont.textContent = unseenLeft ? "Продолжить учить →" : "Повторять дальше →";
+    celebrate(document.getElementById("learn-celebrate"));
     updateHeader(); return;
   }
   done.style.display = "none"; wrap.style.display = "block";
@@ -370,6 +399,47 @@ function nextLearn() {
     elLearnReset.style.display = "inline-flex";
   }
 }
+function buildContinueQueue() {
+  const BATCH = 20;
+  const unseen = shuffle(DATA.filter(q => !S.progress[q.id] || !S.progress[q.id].seen).map(q => q.id));
+  let batch = unseen.slice(0, BATCH);
+  if (batch.length < BATCH) {                      // новых не хватает — добираем повторением слабых
+    const inb = new Set(batch);
+    const seen = DATA.filter(q => S.progress[q.id] && S.progress[q.id].seen && !inb.has(q.id))
+      .sort((a, b) => {
+        const pa = S.progress[a.id], pb = S.progress[b.id];
+        if ((pa.box || 1) !== (pb.box || 1)) return (pa.box || 1) - (pb.box || 1);  // низкие коробки первыми
+        return (pa.last || "") < (pb.last || "") ? -1 : 1;                          // давно не виденные первыми
+      }).map(q => q.id);
+    batch = batch.concat(seen.slice(0, BATCH - batch.length));
+  }
+  learnQueue = shuffle(batch);
+}
+function continueLearn() {
+  continueMode = true;
+  buildContinueQueue();
+  document.getElementById("learn-done").style.display = "none";
+  document.getElementById("learn-card").style.display = "block";
+  nextLearn();
+}
+function celebrate(host) {
+  if (!host) return;
+  host.querySelectorAll(".confetti").forEach(c => c.remove());
+  const colors = ["var(--sage)", "var(--slate)", "var(--gold)", "var(--clay)"];
+  for (let i = 0; i < 12; i++) {
+    const c = document.createElement("i");
+    c.className = "confetti";
+    const ang = (Math.random() * 2 - 1) * 80, dist = 55 + Math.random() * 55;
+    c.style.setProperty("--dx", Math.round(Math.sin(ang * Math.PI / 180) * dist) + "px");
+    c.style.setProperty("--dy", Math.round(-Math.abs(Math.cos(ang * Math.PI / 180)) * dist + 30) + "px");
+    c.style.background = colors[i % colors.length];
+    c.style.left = (45 + Math.random() * 10) + "%";
+    c.style.animationDelay = (Math.random() * 0.15).toFixed(2) + "s";
+    host.appendChild(c);
+  }
+  host.classList.remove("play"); void host.offsetWidth; host.classList.add("play");
+}
+document.getElementById("learn-continue").addEventListener("click", continueLearn);
 function toggleMulti(i, opts) {
   if (learnAnswered) return;
   const btns = opts.querySelectorAll(".opt");
@@ -435,6 +505,8 @@ function commitLearn(correct) {
   if (correct) { np.ok = (np.ok || 0) + 1; np.box = Math.min(5, (np.box || 1) + 1); np.due = daysAdd(todayStr(), INTERVALS[np.box]); }
   else { np.no = (np.no || 0) + 1; np.box = 1; np.due = todayStr(); learnQueue.push(q.id); }
   np.last = todayStr(); S.progress[q.id] = np;
+  if (!S.dayLog || S.dayLog.date !== todayStr()) S.dayLog = { date: todayStr(), count: 0 };
+  S.dayLog.count += 1;
   S.stats.attempts += 1; if (correct) S.stats.correct += 1; save();
   const fb = document.getElementById("learn-feedback");
   fb.textContent = correct ? "Верно" : "Правильные варианты выделены";
